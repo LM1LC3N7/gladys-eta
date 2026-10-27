@@ -5,72 +5,72 @@ contributors.
 
 ## What this is
 
-A Gladys Assistant **external integration**: a Node.js service (Node 22+, ESM,
-no build step) that runs in its own sandboxed Docker container and talks to
-Gladys through
+A Gladys Assistant **external integration** for ETA wood and pellet boilers,
+read only, through the local ETAtouch RESTful webservices: a Node.js service
+(Node 22+, ESM, no build step) that runs in its own sandboxed Docker container
+and talks to Gladys through
 [`@gladysassistant/integration-sdk`](https://github.com/GladysAssistant/integration-sdk-js),
 its only runtime dependency. It started from the official JavaScript template.
+`TODO.md` holds the status, the decisions and the notes on commands.
 
 ## Commands
 
 ```bash
 npm install
 npm test                                  # node --test, the built-in runner
-node --test test/devices.test.js          # one file
-node --test --test-name-pattern "plug"    # tests whose name matches
+node --test test/app.test.js              # one file
+node --test --test-name-pattern "errors"  # tests whose name matches
 npm run lint                              # ESLint
 npm run format:check                      # Prettier, as the CI runs it
 npm run format                            # Prettier, fix in place
+npm run cover                             # regenerates cover.png
 npx github:GladysAssistant/integration-store .   # store admission checks
 ```
-
-The CI (`.github/workflows/ci.yml`) runs `format:check`, `lint` and `test` on
-Node 22 and 24, and builds the Docker image: run the three commands before
-pushing.
 
 ## Architecture
 
 ```
-index.js                          SDK wiring only: handlers registered before connect()
-src/devices/index.js              registry of the device blueprints + dispatch helpers
-src/devices/<type>.js             one device type per file (buildDevice, onPoll, onSetValue...)
-src/scenes.js                     scene action handlers (manifest `scene_actions`)
-src/widgets.js                    dashboard widget handlers (manifest `widgets`)
-src/config.js                     DEFAULT_CONFIG (mirrors the manifest defaults) + normalization
-src/weather.js                    example driver (Open-Meteo)
-gladys-assistant-integration.json manifest: name, config_schema, actions, image...
+index.js                          SDK wiring only
+src/handlers.js                   SDK handlers -> EtaApp (shared with the tests)
+src/app.js                        lifecycle, cycles, failures, errors, devices, badges
+src/catalog.js                    discovery: API version, menu, varinfo, values
+src/client.js                     one GET at a time, 100 ms apart, statuses
+src/http.js                       bounded GET, errors without the address
+src/xml.js                        bounded, linear XML reader (no dependency)
+src/eta.js                        the answers: menu, values, varinfo, errors (pure)
+src/devices.js                    variables -> Gladys devices and states (pure)
+src/config.js                     config_schema normalized (address checks)
+src/store.js                      /data: last attempt, pause, catalog, errors seen
+src/publisher.js                  states and scene events within Gladys' limits
+gladys-assistant-integration.json manifest
 docs/en.md, docs/fr.md            user documentation, re-hosted by Gladys (mandatory)
-test/                             node --test, against the SDK's fake Gladys (integration-sdk/testing)
-.github/scripts/release.mjs       release helpers (manifest bump, changelog), tested in test/
+test/                             node --test, SDK's fake Gladys, fake ETAtouch, test/kit clocks
 ```
 
 ## Rules
 
-- **External ids are forever.** Build them with
-  `gladys.externalIds(type, platformId)`, `platformId` being the unique id the
-  platform gives the device (serial, cloud id, MAC), never a label. Gladys keys
-  devices, their history, scenes and dashboards on them: changing one creates a
-  new device and orphans the old one. The same goes for every key users store:
-  manifest `config_schema`, `actions`, widget and scene keys, feature keys.
-- **The container rootfs is read-only.** Write only under `/data`, the one
-  writable volume. Never log tokens, passwords or API keys.
+- **Read only.** GET only, no feature writable, `onSetValue` refuses every
+  command, no switch or thermostat. Commands would go behind an option off
+  by default, the stop never blocked (see `TODO.md`).
+- **No password on the device side**: say it in the docs; keep the address
+  checks (no path, broadcast, multicast, unspecified).
+- **The answers are untrusted.** Bounded size and XML, own attributes only,
+  strict numbers, invalid markers never published, linear parsing.
+- **Careful reads.** One request at a time; one cycle per interval whatever
+  asks for it (dated in `/data` before its first request); backoff and 429
+  pause in `/data`.
+- **Two clocks.** Wall clock for `/data` only; decisions on the monotonic
+  clock, read once per decision.
+- **External ids are forever.** `ext:<selector>:eta:<node>-<fub>` and
+  `:<fkt>-<io>-<var id>`, `ext:<selector>:eta:errors` and its roles. A
+  republished device never loses a feature.
+- **The container rootfs is read-only.** Write only under `/data`.
 - **Versions belong to the Release workflow** (Actions → Release). Never edit
   `version` in `package.json` or in the manifest, nor the `docker_image` tag,
-  by hand — except on the README's hand-pushed tag path, which bumps all three
-  together before tagging. `test/manifest.test.js` checks they agree.
+  by hand. `test/manifest.test.js` checks they agree.
 - **Changelog.** Every user-visible change adds a line under `## [Unreleased]`
-  in `CHANGELOG.md` (`### Added`, `Changed`, `Fixed`, `Removed`, `Security`).
-  Never write a version heading: the Release workflow moves the section, and it
-  becomes the notes of the GitHub Release.
-- **Manifest.** Texts are multi-language objects `{ "en": ..., "fr": ... }`:
-  `label`, `description` and `placeholder` alike, never a plain string. The
-  catalog `description` holds 10 to 100 characters per language. A field the
-  older cores do not know needs a higher `gladys_version` minimum
-  (`categories`: 4.86.0; `widgets`, `scene_triggers`, `scene_actions`,
-  `type: "provider"`: 5.1.0). `test/manifest.test.js` ties the manifest to the
-  code (defaults, action, scene and widget handlers): change both sides
-  together.
-- **User-facing text** is bilingual (English and French): action messages,
-  manifest texts, and `docs/en.md` / `docs/fr.md`, kept in sync.
+  in `CHANGELOG.md`. Never write a version heading.
+- **User-facing text** is bilingual (English and French), docs kept in sync.
+- **Files** are UTF-8 without BOM (`test/encoding.test.js`).
 - **Style.** Prettier formats, ESLint catches mistakes. Comments explain why,
-  in English. Tests never touch the network.
+  in English. Tests never touch the network (loopback only).

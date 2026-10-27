@@ -1,177 +1,207 @@
 {
   "manifest_version": 1,
   "type": "device",
-  "name": "Demo Devices Template",
+  "name": "ETA",
   "description": {
-    "en": "Starter template showing sensors, a switch, a dimmable light and a smart plug.",
-    "fr": "Template de démarrage : capteurs, interrupteur, lampe variable et prise connectée."
+    "en": "ETA wood and pellet boilers, read only via the local ETAtouch webservices.",
+    "fr": "Chaudières bois et granulés ETA, en lecture seule par les webservices locaux ETAtouch."
   },
-  "version": "1.0.0",
-  "docker_image": "ghcr.io/gladysassistant/integration-template-js:1.0.0",
+  "version": "0.1.0",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-eta:0.1.0",
   "gladys_version": ">=5.1.0",
-  "cover_image": "https://raw.githubusercontent.com/GladysAssistant/integration-template-js/master/cover.png",
-  "categories": ["lighting", "security", "environment"],
-  "transports": ["local", "cloud"],
+  "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-eta/main/cover.png",
+  "categories": ["climate"],
+  "transports": ["local"],
   "config_schema": [
     {
       "key": "intro",
       "type": "section",
-      "label": { "en": "Getting started", "fr": "Pour commencer" },
+      "label": {
+        "en": "Your ETA boiler",
+        "fr": "Votre chaudière ETA"
+      },
       "description": {
-        "en": "The demo weather station reads real data from the free Open-Meteo API: pick the coordinates to observe. No account, no API key.",
-        "fr": "La station météo de démonstration lit de vraies données via l'API gratuite Open-Meteo : choisissez les coordonnées à observer. Pas de compte, pas de clé d'API."
+        "en": "Brings an ETA boiler with an ETAtouch display into Gladys, read only: states, temperatures, pressure, pellet stock and consumption, ash box, counters, active errors and a scene trigger on a new error. Turn the LAN access on (request it on meineta.at, then turn it on in the system settings of the display): the webservices answer on port 8080, without any password, to whoever reaches them, so keep the boiler on your local network only. Nothing can be changed on the boiler from Gladys. Never tested with a real boiler. Not affiliated with ETA.",
+        "fr": "Amène dans Gladys une chaudière ETA à écran ETAtouch, en lecture seule : états, températures, pression, stock et consommation de granulés, cendrier, compteurs, erreurs actives et un déclencheur de scène sur une nouvelle erreur. Activez l'accès LAN (demandez-le sur meineta.at, puis activez-le dans les réglages système de l'écran) : les webservices répondent sur le port 8080, sans aucun mot de passe, à quiconque les atteint ; gardez donc la chaudière sur votre réseau local seulement. Rien ne peut être modifié sur la chaudière depuis Gladys. Jamais testé avec une vraie chaudière. Sans lien avec ETA."
       },
       "links": [
         {
-          "url": "https://open-meteo.com/en/docs",
-          "label": { "en": "Open-Meteo documentation", "fr": "Documentation Open-Meteo" }
+          "url": "https://github.com/LM1LC3N7/gladys-eta/blob/main/docs/fr.md",
+          "label": {
+            "en": "Guide (French)",
+            "fr": "Guide (français)"
+          }
+        },
+        {
+          "url": "https://github.com/LM1LC3N7/gladys-eta/blob/main/docs/en.md",
+          "label": {
+            "en": "Guide (English)",
+            "fr": "Guide (anglais)"
+          }
         }
       ]
     },
     {
-      "key": "latitude",
-      "type": "number",
-      "label": { "en": "Latitude", "fr": "Latitude" },
-      "description": {
-        "en": "Latitude used for the demo weather sensor.",
-        "fr": "Latitude utilisée par le capteur météo de démonstration."
+      "key": "host",
+      "type": "string",
+      "label": {
+        "en": "IP address of the ETAtouch",
+        "fr": "Adresse IP de l'ETAtouch"
       },
-      "placeholder": { "en": "e.g. 48.8566", "fr": "ex. 48.8566" },
-      "required": true,
-      "default": 48.8566,
-      "min": -90,
-      "max": 90
+      "description": {
+        "en": "The address of the touch display of the boiler on your network (shown in its network settings), without a path.",
+        "fr": "L'adresse de l'écran tactile de la chaudière sur votre réseau (affichée dans ses réglages réseau), sans chemin."
+      },
+      "placeholder": {
+        "en": "192.168.1.50",
+        "fr": "192.168.1.50"
+      },
+      "required": true
     },
     {
-      "key": "longitude",
+      "key": "port",
       "type": "number",
-      "label": { "en": "Longitude", "fr": "Longitude" },
-      "description": {
-        "en": "Longitude used for the demo weather sensor.",
-        "fr": "Longitude utilisée par le capteur météo de démonstration."
+      "label": {
+        "en": "Port of the webservices",
+        "fr": "Port des webservices"
       },
-      "placeholder": { "en": "e.g. 2.3522", "fr": "ex. 2.3522" },
-      "required": true,
-      "default": 2.3522,
-      "min": -180,
-      "max": 180
-    },
-    {
-      "key": "unit",
-      "type": "select",
-      "label": { "en": "Temperature unit", "fr": "Unité de température" },
+      "description": {
+        "en": "8080 on every ETAtouch.",
+        "fr": "8080 sur tous les ETAtouch."
+      },
       "required": false,
-      "default": "celsius",
+      "default": 8080,
+      "min": 1,
+      "max": 65535
+    },
+    {
+      "key": "variables",
+      "type": "select",
+      "label": {
+        "en": "Values offered in Discovery",
+        "fr": "Valeurs proposées dans la Découverte"
+      },
+      "description": {
+        "en": "Main values: about thirty (states, temperatures, pellets, counters). All values: every readable value of the menu (several hundred, the first reading takes a few minutes). Only the values of the devices you add are read afterwards.",
+        "fr": "Valeurs principales : une trentaine (états, températures, granulés, compteurs). Toutes les valeurs : toutes les valeurs lisibles du menu (plusieurs centaines, la première lecture prend quelques minutes). Seules les valeurs des appareils ajoutés sont lues ensuite."
+      },
+      "required": false,
+      "default": "main",
       "options": [
-        { "value": "celsius", "label": { "en": "Celsius", "fr": "Celsius" } },
-        { "value": "fahrenheit", "label": { "en": "Fahrenheit", "fr": "Fahrenheit" } }
+        {
+          "value": "main",
+          "label": {
+            "en": "Main values",
+            "fr": "Valeurs principales"
+          }
+        },
+        {
+          "value": "all",
+          "label": {
+            "en": "All values",
+            "fr": "Toutes les valeurs"
+          }
+        }
       ]
     },
     {
-      "key": "poll_frequency",
+      "key": "poll_interval",
       "type": "number",
-      "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
+      "label": {
+        "en": "Refresh interval (s)",
+        "fr": "Intervalle de rafraîchissement (s)"
+      },
       "description": {
-        "en": "How often sensors are polled, in seconds (one minute minimum).",
-        "fr": "Fréquence d'interrogation des capteurs, en secondes (une minute minimum)."
+        "en": "Seconds between two reads of the boiler (60 to 3600). Each read asks the values one at a time.",
+        "fr": "Secondes entre deux lectures de la chaudière (60 à 3600). Chaque lecture demande les valeurs une à une."
       },
       "required": false,
-      "default": 300,
+      "default": 60,
       "min": 60,
       "max": 3600
+    },
+    {
+      "key": "language",
+      "type": "select",
+      "label": {
+        "en": "Language of the names",
+        "fr": "Langue des noms"
+      },
+      "description": {
+        "en": "Used for the errors device and the messages of the integration. The names of the values come from the display, in its language.",
+        "fr": "Sert à l'appareil des erreurs et aux messages de l'intégration. Les noms des valeurs viennent de l'écran, dans sa langue."
+      },
+      "required": false,
+      "default": "fr",
+      "options": [
+        {
+          "value": "fr",
+          "label": {
+            "en": "French",
+            "fr": "Français"
+          }
+        },
+        {
+          "value": "en",
+          "label": {
+            "en": "English",
+            "fr": "Anglais"
+          }
+        }
+      ]
     }
   ],
   "actions": [
     {
-      "key": "test_weather",
-      "label": { "en": "Test the weather provider", "fr": "Tester le fournisseur météo" },
-      "timeout_seconds": 30
-    },
-    {
-      "key": "identify",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ]
+      "key": "test_connection",
+      "label": {
+        "en": "Test the connection",
+        "fr": "Tester la connexion"
+      },
+      "description": {
+        "en": "Reads the boiler once, if the refresh interval has passed since the last read and no pause holds; otherwise shows the status and the time left.",
+        "fr": "Lit une fois la chaudière, si l'intervalle de rafraîchissement est écoulé depuis la dernière lecture et qu'aucune pause n'est en cours ; sinon affiche l'état et le temps restant."
+      },
+      "timeout_seconds": 120
     }
   ],
   "scene_triggers": [
     {
-      "key": "motion_detected",
-      "label": { "en": "Motion detected", "fr": "Mouvement détecté" },
-      "description": {
-        "en": "A demo motion sensor saw a person or an animal move.",
-        "fr": "Un détecteur de démonstration a vu bouger une personne ou un animal."
+      "key": "eta_error",
+      "label": {
+        "en": "ETA boiler error",
+        "fr": "Erreur de la chaudière ETA"
       },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Sensor", "fr": "Détecteur" }
-        },
-        {
-          "key": "target",
-          "type": "multi_select",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" },
-          "options": [
-            { "value": "person", "label": { "en": "Person", "fr": "Personne" } },
-            { "value": "animal", "label": { "en": "Animal", "fr": "Animal" } }
-          ]
-        }
-      ],
+      "description": {
+        "en": "When a read shows an active error never seen before (at each refresh; never at the very first read).",
+        "fr": "Quand une lecture montre une erreur active jamais vue (à chaque rafraîchissement ; jamais à la toute première lecture)."
+      },
       "variables": [
         {
-          "key": "target",
+          "key": "message",
           "type": "string",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" }
+          "label": {
+            "en": "Message",
+            "fr": "Message"
+          }
+        },
+        {
+          "key": "block",
+          "type": "string",
+          "label": {
+            "en": "Part of the installation",
+            "fr": "Partie de l'installation"
+          }
+        },
+        {
+          "key": "priority",
+          "type": "string",
+          "label": {
+            "en": "Priority (as the display shows it)",
+            "fr": "Priorité (telle que l'écran l'affiche)"
+          }
         }
       ]
-    }
-  ],
-  "scene_actions": [
-    {
-      "key": "identify_device",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "description": {
-        "en": "Make a device signal itself (the demo light blinks).",
-        "fr": "Fait se signaler un appareil (la lampe de démonstration clignote)."
-      },
-      "timeout_seconds": 15,
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "key": "signalled",
-          "type": "boolean",
-          "label": { "en": "Device signalled", "fr": "Appareil signalé" }
-        }
-      ]
-    }
-  ],
-  "widgets": [
-    {
-      "key": "demo_status",
-      "label": { "en": "Demo status", "fr": "État de la démo" },
-      "description": {
-        "en": "Live temperature and plug power, plug connection and observed location.",
-        "fr": "Température et puissance en direct, connexion de la prise, position observée."
-      },
-      "icon": "activity",
-      "action_timeout_seconds": 15
     }
   ]
 }
