@@ -164,9 +164,11 @@ export async function setup(
     eta = fakeEta({ routes, clock }),
     devices = [],
     create = false,
+    prepare = () => {},
   } = {},
 ) {
   const gladys = createFakeGladys({ selector: SELECTOR, config, devices });
+  prepare(gladys);
   const logger = recorder();
   const app = new EtaApp({
     gladys,

@@ -29,6 +29,7 @@ import { LIMITS, SCENE_TRIGGERS, TIMINGS } from './constants.js';
 import {
   ERRORS_ID,
   buildDevices,
+  isLifetimeCounter,
   deviceIds,
   errorStates,
   errorText,
@@ -86,6 +87,10 @@ export class EtaApp {
     this.values = new Map();
     /** featureId -> true for the variables unreadable in the last cycle. */
     this.unreadable = new Set();
+    /** featureId -> the highest value published of a lifetime counter. */
+    this.counters = new Map();
+    /** The failure of the error list in the last cycle, or undefined. */
+    this.errorsFailure = undefined;
     /** Where the next cycle starts in the list of variables (after an interrupted one). */
     this.cursor = 0;
     /** The keys of the errors already seen (kept in /data), or undefined: the first read learns. */
@@ -160,7 +165,56 @@ export class EtaApp {
   stop() {
     this.generation += 1;
     this.clearTimer();
+    this.cancelConfigRetry();
     this.publisher.stop();
+  }
+
+  cancelConfigRetry() {
+    this.configAttempt = (this.configAttempt ?? 0) + 1;
+    if (this.configTimer) {
+      this.timers.clearTimeout(this.configTimer);
+      this.configTimer = undefined;
+    }
+  }
+
+  /**
+   * Connected to Gladys: the configuration is asked with `getConfig`. When it
+   * fails, it is asked again without end (5 s, 15 s, 30 s, then every 60 s)
+   * under a status that says so; a newer connection, a saved configuration or
+   * the stop cancel the retry.
+   */
+  async connectedVia(getConfig) {
+    this.cancelConfigRetry();
+    const attempt = this.configAttempt;
+    let raw;
+    try {
+      raw = await getConfig();
+    } catch (err) {
+      if (attempt !== this.configAttempt) {
+        return;
+      }
+      const wait =
+        TIMINGS.configRetry[Math.min(this.configFailures ?? 0, TIMINGS.configRetry.length - 1)];
+      this.configFailures = (this.configFailures ?? 0) + 1;
+      this.logger.warn(
+        `ETA: reading the configuration from Gladys failed (${err?.name ?? 'error'}); again in ${Math.round(wait / 1000)} s`,
+      );
+      await this.setStatus(false, T.configRetry(age(wait)));
+      this.configTimer = this.timers.setTimeout(() => {
+        this.configTimer = undefined;
+        if (attempt === this.configAttempt) {
+          this.connectedVia(getConfig).catch((e) =>
+            this.logger.error(`ETA: start failed: ${e?.message}`),
+          );
+        }
+      }, wait);
+      return;
+    }
+    if (attempt !== this.configAttempt) {
+      return;
+    }
+    this.configFailures = 0;
+    await this.connected(raw);
   }
 
   clearTimer() {
@@ -215,6 +269,11 @@ export class EtaApp {
 
   /** A new address restarts; the rest applies at once (no read started). */
   async configUpdated(raw = {}) {
+    // A saved configuration brings it: no need to ask Gladys again.
+    this.cancelConfigRetry();
+    if (!this.started) {
+      return this.connected(raw);
+    }
     const next = normalizeConfig(raw);
     const previous = this.config;
     if (
@@ -374,8 +433,19 @@ export class EtaApp {
       }
       this.remember();
       await this.save();
-      const status = T.connected(result.read, result.unreadable, this.catalog?.reduced);
-      await this.setStatus(true, this.catalog?.partial ? join(status, T.partial) : status);
+      let status = T.connected(result.read, result.unreadable, this.catalog?.reduced);
+      if (result.errorsFailure) {
+        status = join(status, T.errorsUnreadable(reasonOf(result.errorsFailure)));
+      }
+      if (this.catalog?.partial) {
+        status = join(status, T.partial);
+      }
+      if (result.total > 0 && result.unreadable === result.total) {
+        // Every variable failed: the ETAtouch answers, but gives nothing.
+        await this.setStatus(false, T.allUnreadable(result.total));
+      } else {
+        await this.setStatus(true, status);
+      }
     } catch (err) {
       if (generation !== this.generation || err?.kind === 'cancelled') {
         return;
@@ -473,19 +543,35 @@ export class EtaApp {
 
   /**
    * One cycle: the active errors, then the variables of the features created
-   * in Gladys, one request at a time. A variable the ETAtouch does not know
-   * or cannot give (404, an <error>, a 5xx, a broken value) only misses its
-   * value; the ETAtouch gone (network or timeout twice in a row, 429) ends
-   * the cycle. The next cycle starts after the variable it stopped at
-   * (rotation): a few variables that never answer cannot starve the others.
+   * in Gladys, one request at a time. The error list is a secondary resource:
+   * when it fails (404, <error>, 5xx, too large, broken XML) the errors
+   * device is not updated, its badge says so, and the values are read all
+   * the same; only the ETAtouch gone (network, timeout, 429) ends the cycle.
+   * A variable the ETAtouch does not know or cannot give (404, an <error>, a
+   * 5xx, a broken value, another uri) only misses its value; the ETAtouch
+   * gone (network or timeout twice in a row, 429) ends the cycle. The next
+   * cycle starts after the variable it stopped at (rotation): a few
+   * variables that never answer cannot starve the others.
    */
   async cycle(generation) {
-    const errors = parseErrorsOrThrow(await this.client.get('/user/errors'));
-    if (generation !== this.generation) {
-      return { read: 0, unreadable: 0 };
+    let errorsFailure;
+    try {
+      const errors = parseErrorsOrThrow(
+        await this.client.get('/user/errors', { maxBytes: LIMITS.errorsBytes }),
+      );
+      if (generation !== this.generation) {
+        return { read: 0, unreadable: 0, total: 0 };
+      }
+      this.ingestErrors(errors);
+    } catch (err) {
+      if (DEVICE_FAILURE.has(err?.kind) || !(err instanceof EtaError)) {
+        throw err;
+      }
+      errorsFailure = err;
+      this.logger.warn(`ETA: the error list could not be read: ${errorReason(err)}`);
     }
-    this.ingestErrors(errors);
-    const all = variablesToRead(this.createdDevices());
+    this.errorsFailure = errorsFailure;
+    const all = variablesToRead(this.createdDevices(), this.catalogUnits());
     const start = all.length > 0 ? this.cursor % all.length : 0;
     const list = [...all.slice(start), ...all.slice(0, start)];
     let read = 0;
@@ -493,7 +579,7 @@ export class EtaApp {
     const unreadable = new Set();
     for (const [index, variable] of list.entries()) {
       if (generation !== this.generation) {
-        return { read, unreadable: unreadable.size };
+        return { read, unreadable: unreadable.size, total: list.length, errorsFailure };
       }
       let value;
       try {
@@ -510,9 +596,14 @@ export class EtaApp {
         unreadable.add(variable.id);
         continue;
       }
-      const state = stateOf(variable.kind, value);
-      if (state === undefined) {
-        // "xxx", "---", out of range: no value now, nothing published.
+      if (value.uri !== undefined && value.uri !== variable.uri) {
+        // The answer of another variable: never published under this one.
+        unreadable.add(variable.id);
+        continue;
+      }
+      const state = stateOf(variable.kind, value, variable.unit);
+      if (state === undefined || !this.counterAccepts(variable, state)) {
+        // "xxx", "---", a text, out of range, a counter going back: nothing published.
         this.values.delete(variable.id);
         continue;
       }
@@ -522,7 +613,47 @@ export class EtaApp {
     }
     this.cursor = 0;
     this.unreadable = unreadable;
-    return { read, unreadable: unreadable.size };
+    return { read, unreadable: unreadable.size, total: list.length, errorsFailure };
+  }
+
+  /** uri -> unit of the "number" variables of the catalog. */
+  catalogUnits() {
+    return new Map(
+      (this.catalog?.entries ?? []).filter((e) => e.kind === 'number').map((e) => [e.uri, e.unit]),
+    );
+  }
+
+  /**
+   * A lifetime counter (total consumption, full load hours, heating runs,
+   * ignitions, kWh/MWh) is never published at 0 nor going back: the last
+   * value known (this run, else the one Gladys holds) wins.
+   */
+  counterAccepts(variable, state) {
+    if (!isLifetimeCounter(variable)) {
+      return true;
+    }
+    if (state.state === 0) {
+      return false;
+    }
+    const kept = this.counters.get(variable.id) ?? this.gladysValue(variable.id);
+    if (kept !== undefined && state.state < kept) {
+      this.logger.warn('ETA: a lifetime counter went back; the value is not published');
+      return false;
+    }
+    this.counters.set(variable.id, state.state);
+    return true;
+  }
+
+  /** The last value Gladys holds for a feature, or undefined. */
+  gladysValue(featureId) {
+    for (const device of this.createdDevices()) {
+      const feature = (device.features ?? []).find((f) => f.external_id === featureId);
+      if (feature) {
+        const v = feature.last_value;
+        return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+      }
+    }
+    return undefined;
   }
 
   /**
@@ -598,6 +729,9 @@ export class EtaApp {
   badge(device) {
     if (this.offline) {
       return { transport: DEVICE_TRANSPORTS.UNREACHABLE };
+    }
+    if (parseDeviceId(device.external_id) === ERRORS_ID && this.errorsFailure) {
+      return { transport: DEVICE_TRANSPORTS.LOCAL, degraded: true, message: T.errorsNotRead };
     }
     const unreadable = (device.features ?? []).some((f) => this.unreadable.has(f.external_id));
     return unreadable

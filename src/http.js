@@ -63,8 +63,12 @@ export function errorReason(err) {
   return 'internal error';
 }
 
-/** Retry-After (seconds or an HTTP date) -> milliseconds, undefined when absent. */
-export function parseRetryAfter(value, now) {
+/**
+ * Retry-After (seconds or an HTTP date) -> milliseconds, undefined when
+ * absent. A date is compared to the answer's own `Date` header when it has
+ * one (the device's clock), else to `now`.
+ */
+export function parseRetryAfter(value, now, dateHeader) {
   if (value === undefined || value === null || value === '') {
     return undefined;
   }
@@ -73,7 +77,11 @@ export function parseRetryAfter(value, now) {
     return Number(text) * 1000;
   }
   const date = Date.parse(text);
-  return Number.isNaN(date) ? undefined : Math.max(0, date - now);
+  if (Number.isNaN(date)) {
+    return undefined;
+  }
+  const sent = Date.parse(String(dateHeader ?? ''));
+  return Math.max(0, date - (Number.isNaN(sent) ? now : sent));
 }
 
 /**

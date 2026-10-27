@@ -295,7 +295,7 @@ test('feature ids and kinds of created features', () => {
     list.map((v) => v.uri),
     ['/40/10021/0/0/12161', '/40/10021/0/0/12016'],
   );
-  assert.equal(variablesToRead([boiler], 1).length, 1);
+  assert.equal(variablesToRead([boiler], new Map(), 1).length, 1);
 });
 
 test('the errors device states', () => {

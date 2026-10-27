@@ -22,9 +22,10 @@ export function registerHandlers(gladys, app, logger) {
   gladys.onConfigUpdated((config) => app.configUpdated(config));
 
   // Connection lifecycle: the first connection starts, a reconnection resends.
+  // A failed getConfig() is asked again without end (src/app.js connectedVia).
   gladys.on('connected', async () => {
     try {
-      await app.connected(await gladys.getConfig());
+      await app.connectedVia(() => gladys.getConfig());
     } catch (err) {
       logger?.error('Start failed', err);
     }

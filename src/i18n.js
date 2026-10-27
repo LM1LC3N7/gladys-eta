@@ -74,6 +74,11 @@ export const T = {
     'This address is not an IP address nor a host name of the network.',
     "Cette adresse n'est ni une adresse IP ni un nom d'hôte du réseau.",
   ),
+  configRetry: (wait) =>
+    both(
+      `The configuration could not be read from Gladys: next try in ${wait.en}.`,
+      `La configuration n'a pas pu être lue depuis Gladys : nouvel essai dans ${wait.fr}.`,
+    ),
   connecting: both('Connecting to the ETAtouch...', "Connexion à l'ETAtouch..."),
   discovering: (done, total) =>
     both(
@@ -111,6 +116,20 @@ export const T = {
     both(
       `To spare the ETAtouch, the next read is in ${wait.en}.`,
       `Pour ménager l'ETAtouch, la prochaine lecture a lieu dans ${wait.fr}.`,
+    ),
+  errorsUnreadable: (reason) =>
+    both(
+      `The error list could not be read (${reason.en}).`,
+      `La liste des erreurs n'a pas pu être lue (${reason.fr}).`,
+    ),
+  errorsNotRead: both(
+    'The error list could not be read in the last cycle.',
+    "La liste des erreurs n'a pas pu être lue au dernier cycle.",
+  ),
+  allUnreadable: (n) =>
+    both(
+      `The ETAtouch answers, but none of the ${n} values could be read.`,
+      `L'ETAtouch répond, mais aucune des ${n} valeurs n'a pu être lue.`,
     ),
   readOnly: both(
     'This integration is read only: nothing can be changed on the boiler from Gladys.',

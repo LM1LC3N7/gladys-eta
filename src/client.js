@@ -1,7 +1,8 @@
 // -----------------------------------------------------------------------------
 // The client of the ETAtouch webservices: GET only, one request at a time
-// (the next one leaves after the answer of the previous one), never two
-// closer than 100 ms, whatever asks for them (cycle, discovery, test button).
+// (the next one leaves after the answer of the previous one), 100 ms at
+// least after the end of the previous one, whatever asks for them (cycle,
+// discovery, test button).
 // Paced on the monotonic clock.
 // -----------------------------------------------------------------------------
 
@@ -17,7 +18,7 @@ export class EtaClient {
     this.timers = timers;
     this.host = '';
     this.port = 0;
-    /** Monotonic time of the last request sent, failed ones included. */
+    /** Monotonic time of the end of the last request (sent, while in flight), failed ones included. */
     this.lastRequestAt = -Infinity;
     this.queue = Promise.resolve();
   }
@@ -39,30 +40,46 @@ export class EtaClient {
    * One GET of `path` after the previous request has ended: the `<eta>` root,
    * or an EtaError (an `<error>` answer is a `not_found` one).
    */
-  get(path, { timeout = TIMINGS.requestTimeout, maxBytes = LIMITS.answerBytes } = {}) {
-    const run = this.queue.catch(() => {}).then(() => this.getNow(path, timeout, maxBytes));
+  get(path, { timeout = TIMINGS.requestTimeout, maxBytes = LIMITS.answerBytes, maxNodes } = {}) {
+    const run = this.queue
+      .catch(() => {})
+      .then(() => this.getNow(path, timeout, maxBytes, maxNodes));
     this.queue = run.catch(() => {});
     return run;
   }
 
-  async getNow(path, timeout, maxBytes) {
+  async getNow(path, timeout, maxBytes, maxNodes) {
     if (!this.configured) {
       throw new EtaError('no_config', 'no address');
     }
-    const wait = this.lastRequestAt + TIMINGS.minRequestGap - this.monotonic();
-    if (wait > 0) {
+    // A timer may fire a little early: the gap is checked again after it.
+    for (let i = 0; i < 20; i += 1) {
+      const wait = this.lastRequestAt + TIMINGS.minRequestGap - this.monotonic();
+      if (wait <= 0) {
+        break;
+      }
       await this.sleep(Math.min(wait, TIMINGS.minRequestGap));
     }
     this.lastRequestAt = this.monotonic();
-    const { status, headers, body } = await this.transport(
-      { host: this.host, port: this.port, path },
-      { timeout, maxBytes },
-    );
+    let answer;
+    try {
+      answer = await this.transport(
+        { host: this.host, port: this.port, path },
+        { timeout, maxBytes },
+      );
+    } finally {
+      // The gap counts from the end of the previous request (its answer).
+      this.lastRequestAt = this.monotonic();
+    }
+    const { status, headers, body } = answer;
     if (status === 200) {
       let root;
       try {
-        root = parseAnswer(body);
+        root = parseAnswer(body, { maxNodes });
       } catch (err) {
+        if (err instanceof AnswerError && err.limit) {
+          throw new EtaError('size', 'answer too large');
+        }
         throw new EtaError('bad_response', err instanceof AnswerError ? err.message : 'bad answer');
       }
       if (answerError(root) !== undefined && root.children.length === 1) {
@@ -79,7 +96,8 @@ export class EtaClient {
     if (status === 429) {
       throw new EtaError('rate_limited', 'too many requests', {
         status,
-        retryAfter: parseRetryAfter(headers?.['retry-after'], this.now()),
+        // A date is read against the ETAtouch's own Date header (its clock).
+        retryAfter: parseRetryAfter(headers?.['retry-after'], this.now(), headers?.date),
       });
     }
     if (status >= 500 && status < 600) {

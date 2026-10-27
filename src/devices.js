@@ -26,7 +26,7 @@ import {
   DEVICE_FEATURE_TYPES as TYPES,
   DEVICE_FEATURE_UNITS as U,
 } from '@gladysassistant/integration-sdk';
-import { GLADYS, LIMITS } from './constants.js';
+import { GLADYS, LIFETIME_COUNTERS, LIMITS } from './constants.js';
 import { cleanText, numberOf } from './eta.js';
 import { ERROR_FEATURES, ERRORS_DEVICE, both, word } from './i18n.js';
 
@@ -111,20 +111,73 @@ export function classify(value, info) {
   if (text) {
     return { kind: 'text', unit: '' };
   }
+  // A number only when the display shows one now (a time slot "15:30 - 18:00
+  // 55", "Aus" are not), or, with API 1.2, a DEFAULT variable without a value
+  // now ("xxx").
+  const numeric =
+    measure(value) !== undefined ||
+    (value.text === undefined &&
+      unit !== '' &&
+      (info?.type === 'DEFAULT' || info?.type === 'IEEE-754'));
+  if (!numeric) {
+    return undefined;
+  }
   if (unit === '°C') return { kind: 'temperature', unit };
   if (unit === 'bar') return { kind: 'bar', unit };
   if (unit === 'Pa') return { kind: 'pascal', unit };
   if (unit === 's') return { kind: 'hours', unit };
   if (NUMBER_UNITS.has(unit)) return { kind: 'number', unit };
-  if (
-    unit === '' &&
-    (!info || info.type === 'DEFAULT' || info.type === 'IEEE-754') &&
-    numberOf(value) !== undefined &&
-    /^-?[0-9]{1,12}(?:[.,][0-9]{1,6})?$/.test(value.text ?? '')
-  ) {
+  if (unit === '' && (!info || info.type === 'DEFAULT' || info.type === 'IEEE-754')) {
     return { kind: 'number', unit: '' };
   }
   return undefined;
+}
+
+const PLAIN = /^-?[0-9]{1,12}(?:[.,][0-9]{1,6})?$/;
+const DURATION =
+  /^(?:([0-9]{1,9})h)?\s*(?:([0-9]{1,3})m)?\s*(?:([0-9]{1,3}(?:[.,][0-9]{1,3})?)s)?$/;
+
+/**
+ * The number the display shows (strValue): "-12,5", "12.5", and for
+ * seconds "6940h 41m" or "2m 15,0s"; `{ number, step }` (the smallest unit
+ * shown) or undefined (a text, a time, a time slot).
+ */
+export function shownNumber(text, unit) {
+  const t = String(text ?? '').trim();
+  if (PLAIN.test(t)) {
+    return { number: Number(t.replace(',', '.')), step: 0 };
+  }
+  const match = unit === 's' ? DURATION.exec(t) : null;
+  if (match && (match[1] || match[2] || match[3])) {
+    const [h, m, sec] = [match[1], match[2], match[3]].map((v) =>
+      Number((v ?? '0').replace(',', '.')),
+    );
+    return { number: h * 3600 + m * 60 + sec, step: match[3] ? 1 : match[2] ? 60 : 3600 };
+  }
+  return undefined;
+}
+
+/**
+ * A measure: raw / scaleFactor, only when the display shows the same number
+ * (strValue, within its rounding); undefined otherwise ("Aus", a time slot,
+ * "xxx", a raw value that disagrees). When the raw value lost digits (written
+ * as `2.49865e+07`), the number shown is the one kept.
+ */
+export function measure(value) {
+  const number = numberOf(value);
+  const shown = value ? shownNumber(value.text, value.unit) : undefined;
+  if (number === undefined || shown === undefined) {
+    return undefined;
+  }
+  const rounding = shown.step > 0 ? shown.step : 0.5 * 10 ** -(value.decimals ?? 0);
+  const tolerance =
+    (value.rounded ? Math.abs(shown.number) * 1e-3 : Math.abs(shown.number) * 1e-6) +
+    rounding +
+    1e-9;
+  if (Math.abs(number - shown.number) > tolerance) {
+    return undefined;
+  }
+  return value.rounded ? shown.number : number;
 }
 
 /** The kind of a feature created in Gladys (its category, type and unit). */
@@ -145,28 +198,30 @@ export function kindOfFeature(feature) {
   }
 }
 
-/** The unit the value must have for each kind (number: any). */
+/** The unit the value must have for each kind ("number": the unit of the feature). */
 const UNIT_OF_KIND = { temperature: '°C', bar: 'bar', pascal: 'Pa', hours: 's' };
 
 const inRange = (number, { min, max }) =>
   number !== undefined && number >= min && number <= max ? number : undefined;
 
 /**
- * The Gladys state of a value read for a feature of `kind`: `{ state }`,
- * `{ text }`, or undefined (invalid now: "xxx", "---", out of range, or a
- * unit no longer the one of the feature).
+ * The Gladys state of a value read for a feature of `kind` (`unit`: the
+ * unit of a "number" feature, '' when it has none): `{ state }`, `{ text }`,
+ * or undefined (invalid now: "xxx", "---", a text where a number is
+ * expected, out of range, or a unit no longer the one of the feature).
  */
-export function stateOf(kind, value) {
+export function stateOf(kind, value, unit = '') {
   if (!value || !Object.hasOwn(SHAPES, kind)) {
     return undefined;
   }
   if (kind === 'text') {
     return value.text === undefined ? undefined : { text: value.text };
   }
-  if (UNIT_OF_KIND[kind] !== undefined && value.unit !== UNIT_OF_KIND[kind]) {
+  const expected = kind === 'number' ? unit : UNIT_OF_KIND[kind];
+  if (value.unit !== expected) {
     return undefined;
   }
-  const number = numberOf(value);
+  const number = measure(value);
   if (kind === 'hours') {
     const hours = number === undefined ? undefined : Math.round((number / 3600) * 100) / 100;
     const state = inRange(hours, SHAPES.hours);
@@ -174,6 +229,16 @@ export function stateOf(kind, value) {
   }
   const state = inRange(number, SHAPES[kind]);
   return state === undefined ? undefined : { state };
+}
+
+/** A lifetime counter: never 0, never going back. */
+export function isLifetimeCounter(variable) {
+  const parts = String(variable?.uri ?? '').split('/');
+  const id = Number(parts[5]);
+  return (
+    (parts[3] === '0' && parts[4] === '0' && LIFETIME_COUNTERS.has(id)) ||
+    (variable?.kind === 'number' && (variable.unit === 'kWh' || variable.unit === 'MWh'))
+  );
 }
 
 // --- Ids ---------------------------------------------------------------------
@@ -351,7 +416,7 @@ export function buildDevices(gladys, catalog, created, language) {
  * Gladys, `[{ id (feature external id), uri, kind, block }]`, each feature
  * once, at most `max`.
  */
-export function variablesToRead(created, max = LIMITS.variablesPerCycle) {
+export function variablesToRead(created, units = new Map(), max = LIMITS.variablesPerCycle) {
   const list = [];
   const seen = new Set();
   for (const device of created) {
@@ -366,10 +431,17 @@ export function variablesToRead(created, max = LIMITS.variablesPerCycle) {
         return list;
       }
       seen.add(feature.external_id);
-      list.push({ id: feature.external_id, uri: parsed.uri, kind, block });
+      const unit = kind === 'number' ? (units.get(parsed.uri) ?? unitInName(feature.name)) : '';
+      list.push({ id: feature.external_id, uri: parsed.uri, kind, unit, block });
     }
   }
   return list;
+}
+
+/** The unit at the end of a feature name, "… (kg)" -> "kg"; '' when none. */
+export function unitInName(name) {
+  const match = /\(([^()]{1,8})\)$/.exec(String(name ?? '').trim());
+  return match && NUMBER_UNITS.has(match[1]) ? match[1] : '';
 }
 
 // --- Errors ------------------------------------------------------------------

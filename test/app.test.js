@@ -109,7 +109,7 @@ test('a cycle every interval reads the created features: values, units, invalid 
   assert.ok(varRequests(eta).length > before);
   assert.equal(lastState(gladys, feat(BOILER)), 67.3);
   assert.equal(lastState(gladys, feat(PRESSURE)), 1.36);
-  assert.equal(lastState(gladys, feat(HOURS)), 6940.69);
+  assert.equal(lastState(gladys, feat(HOURS)), 6940.68, 'the number shown, the raw lost digits');
   assert.equal(lastState(gladys, feat(TOTAL)), 13400.5);
   assert.equal(lastState(gladys, feat(STOCK)), 2678.4);
   assert.equal(lastState(gladys, feat(STATE)), 'Bereit');

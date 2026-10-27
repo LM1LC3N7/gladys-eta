@@ -44,8 +44,13 @@ W, tr/min… n'ont pas d'unité dans Gladys (le cœur ne les propose pas pour ce
 catégories) : l'unité est dans le nom, par exemple
 « Zählerstände > Gesamtverbrauch (kg) ». Les kW et kWh ne sont **pas**
 envoyés au tableau de bord énergie de Gladys (il les compterait comme de
-l'électricité). Une valeur que la chaudière n'a pas pour l'instant (« xxx »,
-« --- ») n'est pas publiée : jamais un faux 0.
+l'électricité). Une valeur n'est publiée que si l'écran affiche le même nombre :
+une valeur que la chaudière n'a pas pour l'instant (« xxx », « --- »), un
+texte comme « Aus », une plage horaire ne sont jamais publiés comme nombre,
+jamais un faux 0. Les compteurs à vie (consommation totale, heures à pleine
+charge, mises en chauffe, allumages, kWh) ne sont jamais publiés à 0 ni en
+baisse. La liste des erreurs est lue à part : si elle ne peut pas être lue,
+les valeurs sont lues quand même et l'état le signale.
 
 L'appareil **Erreurs ETA** donne : erreur active (0/1), nombre d'erreurs
 actives, dernière erreur (bloc, message, priorité, heure).
@@ -54,7 +59,9 @@ Déclencheur de scène **Erreur de la chaudière ETA** : quand une lecture
 montre une erreur active jamais vue. Variables : `message`, `block` (la
 partie de l'installation) et `priority` (telle que l'écran l'affiche). Les
 erreurs déjà vues sont gardées (200 au plus, dans `/data`) : une erreur qui
-reste ou revient ne redéclenche pas, même après un redémarrage. Jamais à la
+reste, ou revient avec la même heure, ne redéclenche pas, même après un
+redémarrage (une erreur qui revient avec une nouvelle heure est une nouvelle
+erreur et déclenche). Jamais à la
 toute première lecture (elle apprend les erreurs présentes).
 
 Le badge de chaque appareil affiche « local », « injoignable » quand
@@ -99,13 +106,16 @@ le dernier état.
   précédente.
 - Une lecture par intervalle, jamais plus tôt : ni le bouton, ni la
   Découverte, ni un redémarrage de l'intégration ne la rapprochent (l'heure
-  de chaque lecture est gardée dans `/data` avant sa première requête).
-  Seuls une nouvelle adresse ou un nouveau port (un autre ETAtouch) lisent
+  de chaque lecture est gardée dans `/data` avant sa première requête ; si
+  `/data` n'est pas inscriptible, un redémarrage peut lire plus tôt). Seuls
+  une nouvelle adresse ou un nouveau port (un autre ETAtouch) lisent
   aussitôt.
 - Le menu est lu à la première lecture, puis gardé dans `/data` ; la
   Découverte le relit au plus toutes les 10 minutes, à la lecture suivante.
-  Sa lecture est bornée (2 Mo, 800 entrées, 10 minutes) : au-delà, ce qui a
-  été lu est gardé et l'état le signale.
+  Au-delà de 800 entrées ou de 10 minutes, ce qui a été lu est gardé et
+  l'état le signale ; un menu de plus de 2 Mo (ou 60 000 éléments) est
+  refusé en entier (« une réponse trop grande ») et réessayé après la pause
+  d'un échec.
 - Après un échec : nouvel essai après 1, 2, 5, 10 puis 15 minutes (jamais
   moins que l'intervalle). Si l'ETAtouch demande de ralentir (HTTP 429) :
   pause de 1 minute à 6 heures, gardée après un redémarrage.
@@ -129,6 +139,8 @@ signale.
 - Une valeur qui affichait « --- » sans unité lors de la lecture du menu
   n'est pas proposée ; relancez une Découverte plus tard.
 - Le nom d'une valeur est celui de l'écran au moment de la lecture du menu.
+- Rien ne vérifie que l'ETAtouch à l'adresse est la même chaudière : si un
+  autre ETAtouch prend l'adresse, ses valeurs vont aux mêmes appareils.
 
 ## Dépannage
 

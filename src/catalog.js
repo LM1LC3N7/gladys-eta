@@ -45,6 +45,7 @@ export async function discover(client, { variables, monotonic, cancelled, progre
   const root = await client.get('/user/menu', {
     timeout: TIMINGS.menuTimeout,
     maxBytes: LIMITS.menuBytes,
+    maxNodes: LIMITS.menuNodes,
   });
   let menu;
   try {

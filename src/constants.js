@@ -54,6 +54,8 @@ export const TIMINGS = {
   rateLimitMin: MINUTE,
   rateLimitMax: 6 * HOUR,
   rateLimitDefault: 5 * MINUTE,
+  /** getConfig() failed at a connection: asked again after these, then every minute. */
+  configRetry: [5_000, 15_000, 30_000, MINUTE],
   /** The test button answers within this (the action's timeout is 120 s). */
   buttonWait: 90_000,
   /** The test button reads at most every 30 s (and never faster than the interval). */
@@ -76,8 +78,12 @@ export const LIMITS = {
   /** The menu of a big installation is about 50 KB; one value or varinfo about 1 KB. */
   menuBytes: 2 * 1024 * 1024,
   answerBytes: 64 * 1024,
+  /** The error list: a long list of long texts stays under this. */
+  errorsBytes: 256 * 1024,
   /** XML: elements and depth of one answer. */
   xmlNodes: 20_000,
+  /** The menu: 2 MB hold at most about 40 000 elements. */
+  menuNodes: 60_000,
   xmlDepth: 32,
   /** Objects of the menu looked at by one discovery ("all variables"). */
   menuObjects: 800,
@@ -122,3 +128,6 @@ export const MAIN_VARIABLES = new Set([
   // De-ashing and hopper states.
   12050, 12005,
 ]);
+
+/** Lifetime counters among the main variables (never 0, never going back). */
+export const LIFETIME_COUNTERS = new Set([12016, 12153, 12017, 12018]);

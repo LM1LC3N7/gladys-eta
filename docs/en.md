@@ -41,8 +41,12 @@ is in bar or Pa, the hours in hours. kg, %, kW, W, rpm… have no unit in
 Gladys (the core offers none for these categories): the unit is in the name,
 for example "Zählerstände > Gesamtverbrauch (kg)". kW and kWh are **not**
 sent to the Gladys energy dashboard (it would count them as electricity). A
-value the boiler does not have now ("xxx", "---") is not published: never a
-false 0.
+value is published only when the display shows the same number: a value the
+boiler does not have now ("xxx", "---"), a text such as "Aus", a time slot
+are never published as a number, never a false 0. The lifetime counters
+(total consumption, full load hours, heating runs, ignitions, kWh) are never
+published at 0 nor going back. The error list is read apart: when it cannot
+be read, the values are read all the same and the status says so.
 
 The **ETA errors** device gives: active error (0/1), number of active errors,
 last error (block, message, priority, time).
@@ -50,8 +54,9 @@ last error (block, message, priority, time).
 Scene trigger **ETA boiler error**: when a read shows an active error never
 seen before. Variables: `message`, `block` (the part of the installation) and
 `priority` (as the display shows it). The errors already seen are kept (200
-at most, in `/data`): an error that stays or comes back does not fire again,
-even after a restart. Never at the very first read (it learns the errors
+at most, in `/data`): an error that stays, or comes back with the same time,
+does not fire again, even after a restart (one that comes back with a new
+time is a new error and fires). Never at the very first read (it learns the errors
 present).
 
 The badge of each device shows "local", "unreachable" when the ETAtouch does
@@ -95,12 +100,14 @@ status.
 - One request at a time, the next one after the answer of the previous one.
 - One read per interval, never sooner: neither the button, nor Discovery,
   nor a restart of the integration bring it closer (the time of each read is
-  kept in `/data` before its first request). Only a new address or port
-  (another ETAtouch) reads at once.
+  kept in `/data` before its first request; if `/data` cannot be written,
+  a restart may read sooner). Only a new address or port (another ETAtouch)
+  reads at once.
 - The menu is read at the first read, then kept in `/data`; Discovery reads
-  it again at most every 10 minutes, at the next read. Its reading is
-  bounded (2 MB, 800 entries, 10 minutes): past that, what was read is kept
-  and the status says so.
+  it again at most every 10 minutes, at the next read. Past 800
+  entries or 10 minutes, what was read is kept and the status says so; a
+  menu over 2 MB (or 60 000 elements) is refused whole ("an answer too
+  large") and tried again after the pause of a failure.
 - After a failure: new try after 1, 2, 5, 10 then 15 minutes (never less
   than the interval). If the ETAtouch asks to slow down (HTTP 429): a pause
   of 1 minute to 6 hours, kept across a restart.
@@ -123,6 +130,8 @@ so.
 - A value that showed "---" without a unit when the menu was read is not
   offered; run a Discovery again later.
 - The name of a value is the display's when the menu was read.
+- Nothing checks that the ETAtouch at the address is the same boiler: if
+  another ETAtouch takes the address, its values go to the same devices.
 
 ## Troubleshooting
 

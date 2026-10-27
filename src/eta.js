@@ -14,9 +14,11 @@ import { INTERFACE, LIMITS } from './constants.js';
 import { attr, childOf, childrenOf, parseXml, XmlError } from './xml.js';
 
 export class AnswerError extends Error {
-  constructor(message) {
+  /** `limit`: over the bounds of the reader (elements, depth), not malformed. */
+  constructor(message, limit = false) {
     super(message);
     this.name = 'AnswerError';
+    this.limit = limit;
   }
 }
 
@@ -58,15 +60,16 @@ export function cleanText(value, max = LIMITS.textLength) {
 }
 
 /** The root of an answer: an `<eta>` element, else an AnswerError. */
-export function parseAnswer(body) {
+export function parseAnswer(body, { maxNodes = LIMITS.xmlNodes } = {}) {
   let root;
   try {
     root = parseXml(Buffer.isBuffer(body) ? body.toString('utf8') : String(body ?? ''), {
-      maxNodes: LIMITS.xmlNodes,
+      maxNodes,
       maxDepth: LIMITS.xmlDepth,
     });
   } catch (err) {
-    throw new AnswerError(err instanceof XmlError ? `bad XML: ${err.message}` : 'bad XML');
+    const limit = err instanceof XmlError && /too many|too deep/.test(err.message);
+    throw new AnswerError(err instanceof XmlError ? `bad XML: ${err.message}` : 'bad XML', limit);
   }
   if (root.name !== 'eta' || (root.namespace && root.namespace !== INTERFACE.namespace)) {
     throw new AnswerError('not an ETAtouch answer');
@@ -178,6 +181,8 @@ export function parseValue(root) {
     text: INVALID_TEXTS.has(String(str ?? '').trim()) ? undefined : cleanText(str),
     unit: cleanText(attr(node, 'unit'), 16) ?? '',
     raw: Number.isFinite(raw) ? raw : undefined,
+    /** The device writes big raw values with 6 digits only (`2.49865e+07`). */
+    rounded: /e/i.test(rawText),
     scale: integer(attr(node, 'scaleFactor'), 1, 1_000_000),
     decimals: integer(attr(node, 'decPlaces'), 0, 10),
     textOffset: integer(attr(node, 'advTextOffset'), 0, 1_000_000_000),

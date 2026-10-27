@@ -13,7 +13,16 @@ up to date at the end of every milestone.
       restarts, button and Discovery), backoff and 429 pause in `/data`,
       badges, test button, en/fr, docs, cover. Tested against the recorded
       answers of a PE-K (reference fixtures) only, Node 22 and 24.
-- [ ] **Review** (xhigh: heating appliance).
+- [x] **Review r1 fixes** (2026-10-27, review of 93325eb): getConfig() retried
+      without end with a status; the error list read apart (its failure never
+      stops the values); numbers only when strValue shows the same number
+      (texts, time slots never 0), unit checked for "number" too (catalog,
+      else the name suffix); lifetime counters never 0 nor going back; status
+      when every variable fails; menu over the element limit = "too large";
+      Retry-After against the Date header; response uri checked; gap counted
+      from the end of the previous request; docs (identity, /data not
+      writable, errors coming back, menu limits); tests for the bounds.
+- [ ] **Review r2**.
 - [ ] **Milestone 2 — real boiler**: run against a real ETAtouch (see "To
       check"), complete the main ids (buffer tank, solar, room temperature).
 - [ ] **Milestone 3 — commands?** Only if Louis wants them, behind an option
@@ -92,7 +101,15 @@ value, one request at a time with the reads.
   never energy features (heat, not electricity).
 - **Invalid values** (reference): strValue `xxx`, `---`, `--`, `-` or empty =
   no state, never 0; numbers strict (raw must be a decimal number, scale a
-  positive integer).
+  positive integer). A number is published only when strValue shows the same
+  number (`-12,5`, `12.5`, for seconds `6940h 41m` / `2m 15,0s`) within its
+  rounding; when the raw value lost digits (`2.49865e+07`) the number shown
+  is kept (review r1, minor 7). The unit of a "number" feature is the
+  catalog's, else the suffix of its name; a feature renamed without a
+  catalog only reads unitless values.
+- **Lifetime counters** (12016, 12153, 12017, 12018 and kWh/MWh numbers):
+  never 0, never below the highest value of this run or the one Gladys
+  holds (counters reset by design, "since the service", are not in the list).
 - **External ids**: `ext:<selector>:eta:<node>-<fub>` and
   `:<fkt>-<io>-<var id>`; errors device `ext:<selector>:eta:errors`
   (`alarm`, `error-count`, `last-error`). The ETAtouch has no serial number
@@ -104,7 +121,7 @@ value, one request at a time with the reads.
   the external id, category, unit), never by `/data`: a lost or unreadable
   `/data` changes nothing for the created devices; a republished device
   keeps every created feature (shape copied from `gladys.devices`).
-- **Careful reads**: one request at a time (queue), 100 ms between two, 10 s
+- **Careful reads**: one request at a time (queue), 100 ms after the end of the previous one, 10 s
   timeout (30 s for the menu), `Connection: close`, no pipelining. A cycle
   starts at most once per interval, dated (`begin`) in memory and in `/data`
   before its first request; the test button and Discovery never start one
