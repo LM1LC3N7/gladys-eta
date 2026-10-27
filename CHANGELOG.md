@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-27
+
 ### Added
 
 - ETA wood and pellet boilers through the local ETAtouch RESTful webservices,
@@ -22,3 +24,6 @@ the notes of the version's GitHub Release.
 - Careful reads: one request at a time, one cycle per interval (60 s by
   default), never sooner after a restart, the test button or Discovery;
   backoff and 429 pause kept in `/data`.
+
+[Unreleased]: https://github.com/LM1LC3N7/gladys-eta/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-eta/releases/tag/v0.1.1

@@ -1,6 +1,6 @@
 {
   "name": "gladys-eta",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Gladys Assistant external integration for ETA wood and pellet boilers (local ETAtouch RESTful webservices, read only). Not affiliated with ETA.",
   "type": "module",
