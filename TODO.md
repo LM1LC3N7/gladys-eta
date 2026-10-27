@@ -30,7 +30,13 @@ up to date at the end of every milestone.
       tolerance of one unit of the last digit shown (truncation), 1e-5 for a
       rounded raw, days in durations, a refused number counted unreadable;
       404 error list "unknown resource"; tests.
-- [ ] **Review r3** (the last).
+- [x] **Review r3** (2026-10-27): APPROUVÉ, no blocker.
+- [ ] **Next patch — review r3 leftovers**: an unreadable value ("xxx") does
+      not break the run of 3 confirming reads (12, xxx, 12, xxx, 12 publishes a
+      false drop, fixed at the next read); a spurious jump up is published at
+      once, then the true value is held for 3 reads; a new counter that stays
+      at 0 is reported as "read lower than before"; no test for the
+      60 000-element menu limit.
 - [ ] **Milestone 2 — real boiler**: run against a real ETAtouch (see "To
       check"), complete the main ids (buffer tank, solar, room temperature).
 - [ ] **Milestone 3 — commands?** Only if Louis wants them, behind an option
