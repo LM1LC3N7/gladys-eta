@@ -44,8 +44,12 @@ sent to the Gladys energy dashboard (it would count them as electricity). A
 value is published only when the display shows the same number: a value the
 boiler does not have now ("xxx", "---"), a text such as "Aus", a time slot
 are never published as a number, never a false 0. The lifetime counters
-(total consumption, full load hours, heating runs, ignitions, kWh) are never
-published at 0 nor going back. The error list is read apart: when it cannot
+(total consumption, full load hours, heating runs, ignitions) are never
+published at 0 nor going back on a single read: a lower value is held back
+(the status and the device's badge say so) until 3 reads in a row above 0 confirm it (a 0 is never published);
+then the counter goes on from there. After a counter reset or a boiler
+replacement, nothing to do: the new values appear after 3 reads. Other kWh
+values (a daily heat quantity) are published as read. The error list is read apart: when it cannot
 be read, the values are read all the same and the status says so.
 
 The **ETA errors** device gives: active error (0/1), number of active errors,
@@ -129,7 +133,9 @@ so.
   others (buffer tank, solar…): then choose "All values".
 - A value that showed "---" without a unit when the menu was read is not
   offered; run a Discovery again later.
-- The name of a value is the display's when the menu was read.
+- The name of a value is the display's when the menu was read. A number
+  value you rename keeps its unit while the menu lists it; one no longer
+  listed takes the unit the boiler sends.
 - Nothing checks that the ETAtouch at the address is the same boiler: if
   another ETAtouch takes the address, its values go to the same devices.
 

@@ -133,35 +133,37 @@ export function classify(value, info) {
   return undefined;
 }
 
-const PLAIN = /^-?[0-9]{1,12}(?:[.,][0-9]{1,6})?$/;
+const PLAIN = /^-?[0-9]{1,12}(?:[.,]([0-9]{1,6}))?$/;
 const DURATION =
-  /^(?:([0-9]{1,9})h)?\s*(?:([0-9]{1,3})m)?\s*(?:([0-9]{1,3}(?:[.,][0-9]{1,3})?)s)?$/;
+  /^(?:([0-9]{1,6})d)?\s*(?:([0-9]{1,9})h)?\s*(?:([0-9]{1,3})m)?\s*(?:([0-9]{1,3})(?:[.,]([0-9]{1,3}))?s)?$/;
 
 /**
  * The number the display shows (strValue): "-12,5", "12.5", and for
- * seconds "6940h 41m" or "2m 15,0s"; `{ number, step }` (the smallest unit
- * shown) or undefined (a text, a time, a time slot).
+ * seconds "1d 2h", "6940h 41m" or "2m 15,0s"; `{ number, step }` (one unit
+ * of the last digit shown) or undefined (a text, a time, a time slot).
  */
 export function shownNumber(text, unit) {
   const t = String(text ?? '').trim();
-  if (PLAIN.test(t)) {
-    return { number: Number(t.replace(',', '.')), step: 0 };
+  const plain = PLAIN.exec(t);
+  if (plain) {
+    return { number: Number(t.replace(',', '.')), step: 10 ** -(plain[1]?.length ?? 0) };
   }
-  const match = unit === 's' ? DURATION.exec(t) : null;
-  if (match && (match[1] || match[2] || match[3])) {
-    const [h, m, sec] = [match[1], match[2], match[3]].map((v) =>
-      Number((v ?? '0').replace(',', '.')),
-    );
-    return { number: h * 3600 + m * 60 + sec, step: match[3] ? 1 : match[2] ? 60 : 3600 };
+  const m = unit === 's' ? DURATION.exec(t) : null;
+  if (m && (m[1] || m[2] || m[3] || m[4])) {
+    const n = (v) => Number(v ?? '0');
+    const seconds = Number(`${m[4] ?? '0'}.${m[5] ?? '0'}`);
+    const step = m[4] !== undefined ? 10 ** -(m[5]?.length ?? 0) : m[3] ? 60 : m[2] ? 3600 : 86400;
+    return { number: n(m[1]) * 86400 + n(m[2]) * 3600 + n(m[3]) * 60 + seconds, step };
   }
   return undefined;
 }
 
 /**
  * A measure: raw / scaleFactor, only when the display shows the same number
- * (strValue, within its rounding); undefined otherwise ("Aus", a time slot,
- * "xxx", a raw value that disagrees). When the raw value lost digits (written
- * as `2.49865e+07`), the number shown is the one kept.
+ * within one unit of its last digit (rounded or truncated); undefined
+ * otherwise ("Aus", a time slot, "xxx", a raw value that disagrees). When
+ * the raw value lost digits (written as `2.49865e+07`: 6 significant
+ * digits), it must agree within 1e-5, and the number shown is the one kept.
  */
 export function measure(value) {
   const number = numberOf(value);
@@ -169,11 +171,10 @@ export function measure(value) {
   if (number === undefined || shown === undefined) {
     return undefined;
   }
-  const rounding = shown.step > 0 ? shown.step : 0.5 * 10 ** -(value.decimals ?? 0);
   const tolerance =
-    (value.rounded ? Math.abs(shown.number) * 1e-3 : Math.abs(shown.number) * 1e-6) +
-    rounding +
-    1e-9;
+    shown.step +
+    (value.rounded ? Math.abs(shown.number) * 1e-5 : 0) +
+    Math.abs(shown.number) * 1e-9;
   if (Math.abs(number - shown.number) > tolerance) {
     return undefined;
   }
@@ -206,11 +207,12 @@ const inRange = (number, { min, max }) =>
 
 /**
  * The Gladys state of a value read for a feature of `kind` (`unit`: the
- * unit of a "number" feature, '' when it has none): `{ state }`, `{ text }`,
+ * unit of a "number" feature, '' when it has none, undefined when unknown:
+ * then any number unit): `{ state }`, `{ text }`,
  * or undefined (invalid now: "xxx", "---", a text where a number is
  * expected, out of range, or a unit no longer the one of the feature).
  */
-export function stateOf(kind, value, unit = '') {
+export function stateOf(kind, value, unit) {
   if (!value || !Object.hasOwn(SHAPES, kind)) {
     return undefined;
   }
@@ -218,7 +220,11 @@ export function stateOf(kind, value, unit = '') {
     return value.text === undefined ? undefined : { text: value.text };
   }
   const expected = kind === 'number' ? unit : UNIT_OF_KIND[kind];
-  if (value.unit !== expected) {
+  if (
+    expected === undefined
+      ? value.unit !== '' && !NUMBER_UNITS.has(value.unit)
+      : value.unit !== expected
+  ) {
     return undefined;
   }
   const number = measure(value);
@@ -231,14 +237,10 @@ export function stateOf(kind, value, unit = '') {
   return state === undefined ? undefined : { state };
 }
 
-/** A lifetime counter: never 0, never going back. */
+/** A lifetime counter (by id only: a kWh value may well restart every day). */
 export function isLifetimeCounter(variable) {
   const parts = String(variable?.uri ?? '').split('/');
-  const id = Number(parts[5]);
-  return (
-    (parts[3] === '0' && parts[4] === '0' && LIFETIME_COUNTERS.has(id)) ||
-    (variable?.kind === 'number' && (variable.unit === 'kWh' || variable.unit === 'MWh'))
-  );
+  return parts[3] === '0' && parts[4] === '0' && LIFETIME_COUNTERS.has(Number(parts[5]));
 }
 
 // --- Ids ---------------------------------------------------------------------
@@ -431,6 +433,8 @@ export function variablesToRead(created, units = new Map(), max = LIMITS.variabl
         return list;
       }
       seen.add(feature.external_id);
+      // A "number" feature: the catalog's unit, else the one in its name, else
+      // unknown (a feature renamed and no longer in the menu): any unit.
       const unit = kind === 'number' ? (units.get(parsed.uri) ?? unitInName(feature.name)) : '';
       list.push({ id: feature.external_id, uri: parsed.uri, kind, unit, block });
     }
@@ -438,10 +442,10 @@ export function variablesToRead(created, units = new Map(), max = LIMITS.variabl
   return list;
 }
 
-/** The unit at the end of a feature name, "… (kg)" -> "kg"; '' when none. */
+/** The unit at the end of a feature name, "… (kg)" -> "kg"; undefined when none. */
 export function unitInName(name) {
   const match = /\(([^()]{1,8})\)$/.exec(String(name ?? '').trim());
-  return match && NUMBER_UNITS.has(match[1]) ? match[1] : '';
+  return match && NUMBER_UNITS.has(match[1]) ? match[1] : undefined;
 }
 
 // --- Errors ------------------------------------------------------------------

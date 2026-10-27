@@ -22,7 +22,15 @@ up to date at the end of every milestone.
       Retry-After against the Date header; response uri checked; gap counted
       from the end of the previous request; docs (identity, /data not
       writable, errors coming back, menu limits); tests for the bounds.
-- [ ] **Review r2**.
+- [x] **Review r2 fixes** (2026-10-27, review of 3b8ee63): lifetime counters
+      by id only, a drop held back with a status and a degraded badge, accepted
+      after 3 concordant reads, forgotten when the device is deleted, one log
+      per drop; 403 everywhere without devices not "Connected"; a renamed
+      number feature out of the catalog read with the value's unit; measure
+      tolerance of one unit of the last digit shown (truncation), 1e-5 for a
+      rounded raw, days in durations, a refused number counted unreadable;
+      404 error list "unknown resource"; tests.
+- [ ] **Review r3** (the last).
 - [ ] **Milestone 2 — real boiler**: run against a real ETAtouch (see "To
       check"), complete the main ids (buffer tank, solar, room temperature).
 - [ ] **Milestone 3 — commands?** Only if Louis wants them, behind an option
@@ -105,11 +113,18 @@ value, one request at a time with the reads.
   number (`-12,5`, `12.5`, for seconds `6940h 41m` / `2m 15,0s`) within its
   rounding; when the raw value lost digits (`2.49865e+07`) the number shown
   is kept (review r1, minor 7). The unit of a "number" feature is the
-  catalog's, else the suffix of its name; a feature renamed without a
-  catalog only reads unitless values.
-- **Lifetime counters** (12016, 12153, 12017, 12018 and kWh/MWh numbers):
-  never 0, never below the highest value of this run or the one Gladys
-  holds (counters reset by design, "since the service", are not in the list).
+  catalog's, else the suffix of its name, else (renamed and no longer in the
+  menu) any number unit the value has. Tolerance: one unit of the last digit
+  shown (rounded or truncated display); 1e-5 more for a raw in `e` notation.
+  A number refused while the display shows something is counted unreadable.
+- **Lifetime counters** (ids 12016, 12153, 12017, 12018 only; a kWh value may
+  restart every day): a 0 or a value below the last known (this run, else
+  the one Gladys holds) is held back, said in the status and the badge, one
+  log per drop; 3 reads in a row above 0 that never go back confirm it (a 0 is never
+  published) (a reset, a
+  boiler replaced) and the counter goes on from there (review r2: no guard
+  without an exit). Counters reset by design ("since the service") are not
+  in the list. Forgotten when the device is deleted.
 - **External ids**: `ext:<selector>:eta:<node>-<fub>` and
   `:<fkt>-<io>-<var id>`; errors device `ext:<selector>:eta:errors`
   (`alarm`, `error-count`, `last-error`). The ETAtouch has no serial number

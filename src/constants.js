@@ -98,6 +98,8 @@ export const LIMITS = {
   /** Active errors read, and their keys remembered in /data. */
   errors: 50,
   seenErrors: 200,
+  /** Reads in a row (never going back) that confirm a drop of a lifetime counter. */
+  counterConfirmations: 3,
   /** Scene events fired by one read at most. */
   eventsPerRead: 5,
   /** A text state, a name. */

@@ -60,6 +60,10 @@ const REASONS = {
 
 export const reasonOf = (err) => REASONS[err?.kind] ?? REASONS.internal;
 
+/** The reason of a failed error list (a 404 there is no wrong port: the values answer). */
+export const errorsReasonOf = (err) =>
+  err?.kind === 'not_found' ? both('unknown resource', 'ressource inconnue') : reasonOf(err);
+
 /** Connection statuses and button answers. */
 export const T = {
   noConfig: both(
@@ -125,6 +129,16 @@ export const T = {
   errorsNotRead: both(
     'The error list could not be read in the last cycle.',
     "La liste des erreurs n'a pas pu être lue au dernier cycle.",
+  ),
+  notConnected: (reason) => both(`Not connected: ${reason.en}.`, `Non connecté : ${reason.fr}.`),
+  countersHeld: (n) =>
+    both(
+      `${n} lifetime counter(s) read lower than before: held back until 3 reads in a row confirm it.`,
+      `${n} compteur(s) à vie lu(s) plus bas qu'avant : retenu(s) jusqu'à 3 lectures concordantes.`,
+    ),
+  counterHeld: both(
+    'A lifetime counter read lower than before is held back until confirmed.',
+    "Un compteur à vie lu plus bas qu'avant est retenu jusqu'à confirmation.",
   ),
   allUnreadable: (n) =>
     both(

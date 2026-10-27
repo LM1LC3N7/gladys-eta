@@ -311,3 +311,221 @@ test('a lifetime counter read at 0 with nothing known before is not published', 
   assert.equal(lastState(gladys, feat(TOTAL)), undefined);
   assert.ok(lastState(gladys, feat(BOILER)) !== undefined);
 });
+
+// --- Review r2 ---------------------------------------------------------------
+
+test('a lifetime counter reset: held back, signalled, then accepted after 3 reads', async (t) => {
+  const { gladys, eta, wait, app, logger } = await setup(t, { create: true });
+  await wait(left(app));
+  eta.routes[`/user/var${TOTAL}`] = value(TOTAL, { str: '12', raw: 120, unit: 'kg', scale: 10 });
+  await wait(left(app));
+  assert.equal(lastState(gladys, feat(TOTAL)), 13400.5);
+  assert.match(statusOf(gladys).message.en, /1 lifetime counter\(s\) read lower/);
+  const badge = gladys.fake.transports
+    .filter((b) => b.device_external_id === dev('40-10021'))
+    .at(-1);
+  assert.equal(badge.degraded, true);
+  assert.match(badge.message.en, /held back/);
+  await wait(left(app));
+  assert.equal(lastState(gladys, feat(TOTAL)), 13400.5);
+  await wait(left(app));
+  assert.equal(lastState(gladys, feat(TOTAL)), 12, 'the third read confirms');
+  assert.doesNotMatch(statusOf(gladys).message.en, /lifetime counter/);
+  eta.routes[`/user/var${TOTAL}`] = value(TOTAL, { str: '250', raw: 2500, unit: 'kg', scale: 10 });
+  await wait(left(app));
+  assert.equal(lastState(gladys, feat(TOTAL)), 250);
+  assert.equal(
+    logger.lines.filter((l) => /held back until confirmed/.test(l)).length,
+    1,
+    'one log per drop',
+  );
+});
+
+test('a drop that goes back up before being confirmed is never published', async (t) => {
+  const { gladys, eta, wait, app } = await setup(t, { create: true });
+  await wait(left(app));
+  eta.routes[`/user/var${TOTAL}`] = value(TOTAL, { str: '50', raw: 500, unit: 'kg', scale: 10 });
+  await wait(left(app));
+  eta.routes[`/user/var${TOTAL}`] = value(TOTAL, { str: '10', raw: 100, unit: 'kg', scale: 10 });
+  await wait(left(app));
+  await wait(left(app));
+  assert.equal(lastState(gladys, feat(TOTAL)), 13400.5, '50 then 10: not concordant');
+});
+
+test('a deleted device forgets its counters', async (t) => {
+  const { gladys, eta, wait, app } = await setup(t, { create: true });
+  await wait(left(app));
+  const boiler = gladys.fake.devices.find((d) => d.external_id === dev('40-10021'));
+  await gladys.fake.deviceDeleted(boiler);
+  await gladys.fake.deviceCreated({
+    ...boiler,
+    features: boiler.features.map(({ last_value: _, ...f }) => f),
+  });
+  eta.routes[`/user/var${TOTAL}`] = value(TOTAL, { str: '12', raw: 120, unit: 'kg', scale: 10 });
+  await wait(left(app));
+  assert.equal(lastState(gladys, feat(TOTAL)), 12);
+});
+
+test('the value Gladys holds is a floor until 3 reads confirm a lower counter', async (t) => {
+  const first = await setup(t, { create: true });
+  const devices = first.gladys.fake.devices.map((d) => ({
+    ...d,
+    features: d.features.map((f) =>
+      f.external_id === feat(TOTAL) ? { ...f, last_value: 13400.5 } : f,
+    ),
+  }));
+  first.app.stop();
+  const routes = pekRoutes({
+    [`/user/var${TOTAL}`]: value(TOTAL, { str: '250', raw: 2500, unit: 'kg', scale: 10 }),
+  });
+  const { gladys, wait, app } = await setup(t, { devices, routes });
+  assert.equal(lastState(gladys, feat(TOTAL)), undefined, 'held: lower than Gladys');
+  await wait(left(app));
+  await wait(left(app));
+  assert.equal(lastState(gladys, feat(TOTAL)), 250);
+});
+
+test('a kWh value that restarts every day is no lifetime counter', async (t) => {
+  const uri = '/40/10021/0/0/99999';
+  const device = {
+    name: 'ETA Kessel',
+    external_id: dev('40-10021'),
+    features: [
+      {
+        name: 'Wärmemenge heute (kWh)',
+        external_id: feat(uri),
+        category: 'unknown',
+        type: 'decimal',
+        read_only: true,
+        has_feedback: false,
+        keep_history: true,
+        min: -1e9,
+        max: 1e9,
+      },
+    ],
+  };
+  const routes = pekRoutes({
+    [`/user/var${uri}`]: value(uri, { str: '12,3', raw: 123, unit: 'kWh', scale: 10, dec: 1 }),
+  });
+  const { gladys, eta, wait, app } = await setup(t, { devices: [device], routes });
+  assert.equal(lastState(gladys, feat(uri)), 12.3);
+  eta.routes[`/user/var${uri}`] = value(uri, {
+    str: '0,4',
+    raw: 4,
+    unit: 'kWh',
+    scale: 10,
+    dec: 1,
+  });
+  await wait(left(app));
+  assert.equal(lastState(gladys, feat(uri)), 0.4);
+});
+
+test('a renamed number feature out of the catalog is read with the unit of its value', async (t) => {
+  const uri = '/40/10021/0/0/12077';
+  const device = {
+    name: 'ETA Kessel',
+    external_id: dev('40-10021'),
+    features: [
+      {
+        name: 'Puissance demandée',
+        external_id: feat(uri),
+        category: 'unknown',
+        type: 'decimal',
+        read_only: true,
+        has_feedback: false,
+        keep_history: true,
+        min: -1e9,
+        max: 1e9,
+      },
+    ],
+  };
+  const { gladys } = await setup(t, {
+    devices: [device],
+    config: { ...CONFIG, variables: 'main' },
+    routes: pekRoutes({ '/user/menu': xml('<menu></menu>') }),
+  });
+  assert.equal(lastState(gladys, feat(uri)), 8.3);
+});
+
+test('403 everywhere and no device created: not "Connected"; a 404 error list has its own reason', async (t) => {
+  const { gladys, eta, wait, app } = await setup(t);
+  eta.routes = new Proxy({}, { get: () => ({ status: 403, body: '' }) });
+  await wait(left(app));
+  assert.equal(statusOf(gladys).connected, false);
+  assert.match(statusOf(gladys).message.en, /access refused/);
+  const second = await setup(t, { create: true });
+  second.eta.routes['/user/errors'] = { status: 404, body: '' };
+  await second.wait(left(second.app));
+  assert.match(
+    statusOf(second.gladys).message.en,
+    /error list could not be read \(unknown resource\)/,
+  );
+  assert.equal(statusOf(second.gladys).connected, true);
+});
+
+test('measure: rounded or truncated display accepted, a wrong one refused and counted unreadable', async (t) => {
+  const { measure } = await import('../src/devices.js');
+  const { parseValue } = await import('../src/eta.js');
+  const { parseAnswer } = await import('../src/eta.js');
+  const m = (o) => measure(parseValue(parseAnswer(value('/1/2/0/0/3', o))));
+  assert.equal(m({ str: '1,4', raw: 143, unit: 'bar', scale: 100, dec: 2 }), 1.43);
+  assert.equal(m({ str: '3', raw: 29, unit: '°C', scale: 10, dec: 1 }), 2.9);
+  assert.equal(m({ str: '57', raw: 579, unit: '°C', scale: 10 }), 57.9, 'truncated');
+  assert.equal(m({ str: '6940h 41m', raw: '2.49865e+07', unit: 's' }), 24986460);
+  assert.equal(m({ str: '6941h 41m', raw: '2.49865e+07', unit: 's' }), undefined);
+  assert.equal(m({ str: '1d 2h', raw: 93600, unit: 's' }), 93600);
+  assert.equal(m({ str: '59', raw: 579, unit: '°C', scale: 10 }), undefined);
+  const { gladys, eta, wait, app } = await setup(t, { create: true });
+  eta.routes[`/user/var${BOILER}`] = value(BOILER, { str: '99', raw: 673, unit: '°C', scale: 10 });
+  await wait(left(app));
+  assert.match(statusOf(gladys).message.en, /1 unreadable/);
+});
+
+test('an error list over 64 KB (under 256 KB) is read', async (t) => {
+  const list = Array.from({ length: 300 }, (_, i) => ({ msg: `Fehler ${i} ${'x'.repeat(200)}` }));
+  const { gladys } = await setup(t, {
+    create: true,
+    routes: pekRoutes({ '/user/errors': errorsXml(list) }),
+  });
+  assert.doesNotMatch(statusOf(gladys).message.en, /error list/);
+});
+
+test('a small menu over 60 000 elements is "too large"', async (t) => {
+  const menu = xml(`<menu><fub uri="/40/10021" name="K">${'<x/>'.repeat(61_000)}</fub></menu>`);
+  assert.ok(Buffer.byteLength(menu) < 2 * 1024 * 1024);
+  const { gladys } = await setup(t, { routes: pekRoutes({ '/user/menu': menu }) });
+  assert.match(statusOf(gladys).message.en, /too large/);
+});
+
+test('the gap counts from the end of the previous request', async () => {
+  const { EtaClient } = await import('../src/client.js');
+  const clock = testClock();
+  const starts = [];
+  const transport = async () => {
+    starts.push(clock.monotonic());
+    await clock.advance(500);
+    return { status: 200, headers: {}, body: Buffer.from(xml('<api version="1.2"/>')) };
+  };
+  const client = new EtaClient({
+    transport,
+    monotonic: clock.monotonic,
+    now: clock.now,
+    timers: clock.timers,
+  });
+  client.configure({ host: '10.0.0.2', port: 8080 });
+  const done = Promise.all([client.get('/user/api'), client.get('/user/api')]);
+  for (let i = 0; i < 100 && starts.length < 2; i += 1) await clock.advance(10);
+  await done;
+  assert.ok(starts[1] - starts[0] >= 600, `${starts[1] - starts[0]}`);
+});
+
+test('a lifetime counter at 0 is never published, however long it stays', async (t) => {
+  const { gladys, eta, wait, app } = await setup(t, { create: true });
+  await wait(left(app));
+  eta.routes[`/user/var${TOTAL}`] = value(TOTAL, { str: '0', raw: 0, unit: 'kg', scale: 10 });
+  for (let i = 0; i < 5; i += 1) await wait(left(app));
+  assert.equal(lastState(gladys, feat(TOTAL)), 13400.5);
+  eta.routes[`/user/var${TOTAL}`] = value(TOTAL, { str: '1', raw: 10, unit: 'kg', scale: 10 });
+  for (let i = 0; i < 3; i += 1) await wait(left(app));
+  assert.equal(lastState(gladys, feat(TOTAL)), 1);
+});

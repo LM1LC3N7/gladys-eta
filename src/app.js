@@ -39,7 +39,7 @@ import {
 } from './devices.js';
 import { errorKey, parseErrors, parseValue } from './eta.js';
 import { EtaError, errorReason } from './http.js';
-import { T, age, join, reasonOf, word } from './i18n.js';
+import { T, age, errorsReasonOf, join, reasonOf, word } from './i18n.js';
 import { StatePublisher } from './publisher.js';
 import { fileStore, normalizeMemory } from './store.js';
 
@@ -89,6 +89,8 @@ export class EtaApp {
     this.unreadable = new Set();
     /** featureId -> the highest value published of a lifetime counter. */
     this.counters = new Map();
+    /** featureId -> { count, last } of a lifetime counter held back (a drop not confirmed yet). */
+    this.held = new Map();
     /** The failure of the error list in the last cycle, or undefined. */
     this.errorsFailure = undefined;
     /** Where the next cycle starts in the list of variables (after an interrupted one). */
@@ -435,12 +437,20 @@ export class EtaApp {
       await this.save();
       let status = T.connected(result.read, result.unreadable, this.catalog?.reduced);
       if (result.errorsFailure) {
-        status = join(status, T.errorsUnreadable(reasonOf(result.errorsFailure)));
+        status = join(status, T.errorsUnreadable(errorsReasonOf(result.errorsFailure)));
+      }
+      if (this.held.size > 0) {
+        status = join(status, T.countersHeld(this.held.size));
       }
       if (this.catalog?.partial) {
         status = join(status, T.partial);
       }
-      if (result.total > 0 && result.unreadable === result.total) {
+      const refused = ['forbidden', 'not_found'].includes(result.errorsFailure?.kind);
+      if (refused && result.read === 0) {
+        // The error list refused and no value read (none to read, or all
+        // failing): the ETAtouch gives nothing.
+        await this.setStatus(false, T.notConnected(reasonOf(result.errorsFailure)));
+      } else if (result.total > 0 && result.unreadable === result.total) {
         // Every variable failed: the ETAtouch answers, but gives nothing.
         await this.setStatus(false, T.allUnreadable(result.total));
       } else {
@@ -602,9 +612,16 @@ export class EtaApp {
         continue;
       }
       const state = stateOf(variable.kind, value, variable.unit);
-      if (state === undefined || !this.counterAccepts(variable, state)) {
-        // "xxx", "---", a text, out of range, a counter going back: nothing published.
+      if (state === undefined) {
+        // "xxx", "---": no value now. Anything else (a text, a number the
+        // display does not show, another unit, out of range): not read.
+        if (value.text !== undefined) {
+          unreadable.add(variable.id);
+        }
         this.values.delete(variable.id);
+        continue;
+      }
+      if (!this.counterAccepts(variable, state)) {
         continue;
       }
       read += 1;
@@ -625,23 +642,45 @@ export class EtaApp {
 
   /**
    * A lifetime counter (total consumption, full load hours, heating runs,
-   * ignitions, kWh/MWh) is never published at 0 nor going back: the last
-   * value known (this run, else the one Gladys holds) wins.
+   * ignitions: ids 12016, 12153, 12017, 12018) is held back when it reads 0
+   * or lower than the last value known (this run, else the one Gladys
+   * holds): a glitch never shows as a drop. A drop confirmed by
+   * LIMITS.counterConfirmations reads in a row above 0 that never go back (a
+   * counter reset, a boiler replaced) is accepted: the counter goes on from
+   * there. A 0 is never published.
+   * While held, the status and the device's badge say so; one log per drop.
    */
   counterAccepts(variable, state) {
     if (!isLifetimeCounter(variable)) {
       return true;
     }
-    if (state.state === 0) {
-      return false;
-    }
     const kept = this.counters.get(variable.id) ?? this.gladysValue(variable.id);
-    if (kept !== undefined && state.state < kept) {
-      this.logger.warn('ETA: a lifetime counter went back; the value is not published');
-      return false;
+    if (state.state !== 0 && (kept === undefined || state.state >= kept)) {
+      this.counters.set(variable.id, state.state);
+      this.held.delete(variable.id);
+      return true;
     }
-    this.counters.set(variable.id, state.state);
-    return true;
+    const held = this.held.get(variable.id);
+    if (!held) {
+      this.logger.warn('ETA: a lifetime counter went back or read 0; held back until confirmed');
+    }
+    // A 0 never counts as a confirmation: only values above 0 that never go back.
+    const confirms = state.state === 0 ? 0 : 1;
+    if (held && state.state >= held.last) {
+      held.count += confirms;
+      held.last = state.state;
+    } else {
+      this.held.set(variable.id, { count: confirms, last: state.state });
+    }
+    if (this.held.get(variable.id).count >= LIMITS.counterConfirmations) {
+      this.logger.info(
+        'ETA: a lifetime counter drop was confirmed; the counter goes on from there',
+      );
+      this.counters.set(variable.id, state.state);
+      this.held.delete(variable.id);
+      return true;
+    }
+    return false;
   }
 
   /** The last value Gladys holds for a feature, or undefined. */
@@ -733,6 +772,9 @@ export class EtaApp {
     if (parseDeviceId(device.external_id) === ERRORS_ID && this.errorsFailure) {
       return { transport: DEVICE_TRANSPORTS.LOCAL, degraded: true, message: T.errorsNotRead };
     }
+    if ((device.features ?? []).some((f) => this.held.has(f.external_id))) {
+      return { transport: DEVICE_TRANSPORTS.LOCAL, degraded: true, message: T.counterHeld };
+    }
     const unreadable = (device.features ?? []).some((f) => this.unreadable.has(f.external_id));
     return unreadable
       ? { transport: DEVICE_TRANSPORTS.LOCAL, degraded: true, message: T.notRead }
@@ -784,6 +826,13 @@ export class EtaApp {
     this.badges.delete(device?.external_id);
     if (device?.external_id) {
       this.publisher.forget(device.external_id);
+      for (const map of [this.counters, this.held, this.values]) {
+        for (const id of [...map.keys()]) {
+          if (id.startsWith(`${device.external_id}:`)) {
+            map.delete(id);
+          }
+        }
+      }
     }
   }
 

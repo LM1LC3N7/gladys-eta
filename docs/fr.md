@@ -48,8 +48,13 @@ l'électricité). Une valeur n'est publiée que si l'écran affiche le même nom
 une valeur que la chaudière n'a pas pour l'instant (« xxx », « --- »), un
 texte comme « Aus », une plage horaire ne sont jamais publiés comme nombre,
 jamais un faux 0. Les compteurs à vie (consommation totale, heures à pleine
-charge, mises en chauffe, allumages, kWh) ne sont jamais publiés à 0 ni en
-baisse. La liste des erreurs est lue à part : si elle ne peut pas être lue,
+charge, mises en chauffe, allumages) ne sont jamais publiés à 0 ni en baisse
+sur une seule lecture : une valeur plus basse est retenue (l'état et le badge
+de l'appareil le signalent) jusqu'à ce que 3 lectures de suite au-dessus de 0 la confirment (un 0 n'est jamais publié) ;
+le compteur repart alors de là. Après une remise à zéro ou un remplacement de
+chaudière, rien à faire : les nouvelles valeurs apparaissent après 3
+lectures. Les autres kWh (une quantité de chaleur du jour) sont publiés tels
+quels. La liste des erreurs est lue à part : si elle ne peut pas être lue,
 les valeurs sont lues quand même et l'état le signale.
 
 L'appareil **Erreurs ETA** donne : erreur active (0/1), nombre d'erreurs
@@ -139,6 +144,8 @@ signale.
 - Une valeur qui affichait « --- » sans unité lors de la lecture du menu
   n'est pas proposée ; relancez une Découverte plus tard.
 - Le nom d'une valeur est celui de l'écran au moment de la lecture du menu.
+  Une valeur numérique renommée garde son unité tant que le menu la liste ;
+  sinon elle prend l'unité envoyée par la chaudière.
 - Rien ne vérifie que l'ETAtouch à l'adresse est la même chaudière : si un
   autre ETAtouch prend l'adresse, ses valeurs vont aux mêmes appareils.
 
